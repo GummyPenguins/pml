@@ -1,35 +1,82 @@
 ---
-title: "test1"
+title: "Practical Machine Learning Final Project"
 output: html_document
 ---
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
+How I built the model:
+First, the question we want to answer in this project with is what data collected by different fitness devices can help us to predict the manner in which our participants exercise? 
+The data used here are sourced from http://groupware.les.inf.puc-rio.br/har. 
 ```{r}
-#setwd("/Users/chenhe/Documents/StudyING/Coursera/2015 Practical Machine Learning/00. Final Project")
 ###################
 #   Read in data
 ###################
 library(caret)
+library(ggplot2)
+library(knitr)
 training=read.csv(file="pml-training.csv",header=TRUE, sep=",")
 testing=read.csv(file="pml-testing.csv",header=TRUE, sep=",")
+```
+First, take a look at the columns: 
+```{r}
+str(training)  #Check for the column names and their value types
+```
+The first six columns do not seem to be relevant in our prediction, so I decided to delete them in the model.
+```{r}
+deleteCol= 1:6   #I decided to delete the first 6 columns as they don't appear to be relevant
+```
+Then, I check for columns with a lot of NA values, and add those column numbers to the to-be-deleted list. Then delete all the above. 
+```{r}
+NAcolInd=(union(which(colSums(is.na(training))>0),which(colSums(is.na(testing))>0)))
+deleteCol=c(deleteCol,NAcolInd[order(NAcolInd)])
+training=training[,-deleteCol]  #Delete these columns
+```
+Next, set training and testing data, with 70% of the data in training.
 
-levels(training[,2])  #Check for the number of users and their names
-colnames(training)
-x=colSums(is.na(training))
-y=colSums(is.na(testing))
-yy=(union(which(x>0),which(y>0)))
-deleteCol=yy[order(yy)]
-training=training[,-deleteCol]
-
+```{r}
+inTrain<-createDataPartition(y=training$classe,p=0.7,list=FALSE)
+train<-training[inTrain,]
+tests<-training[-inTrain,]
+```
+Then I wanted to check on variables that have high correlations (>0.9): 
+```{r}
+nrows=dim(training)[1]
+ncols=dim(training)[2]
+corre=cor(training[2:nrows,1:(ncols-1)])
+diag(corre)=0
+which(corre > 0.9, arr.ind=TRUE,useNames=TRUE)
+```
+It appears that "accel_belt_y", "roll_belt" have high correlations with each other and the total variable "total_accel_belt", so I wanted to check out their relationships using a scatterplot matrix:
+```{r}
+library(car)
+scatterplot.matrix(~accel_belt_y+roll_belt+total_accel_belt, data=training,
+  	main="Scatterplot matrix of three belt variables")
 ```
 
-You can also embed plots, for example:
 
-```{r, echo=FALSE}
-plot(cars)
+There appears to be some relationships between the variables, but I decided to let the algorithm to select which of these to use in the end model. 
+
+The algorithm I decided to use is random forest, because of its comparably higher accuracy. I ran the regression on all the remaining variables (after eliminating all NA columns and irrelevant columns). 
+
+For cross validation, I used K-fold cross validation, with K=10, and repeat it 3 times. This is because K-fold cross validation seems to work well, and K between 5 and 10 has been proved to be effective. 
+```{r}
+control<-trainControl(method="repeatedcv",number=10, repeats=3)
+```
+Train the model: 
+```{r}
+set.seed(32323)
+modelrf<-train(classe ~ .,data=train, preProcess=c("center","scale"),method="rf",trControl=control)
+test.pred<-predict(modelrf,tests)
+```
+Then, get a report of estimated out of sample errors， including accuracy and OOB estimated error. 
+```{r}
+modelrf$finalModel
+confusionMatrix(tests$classe,test.pred)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Finally, predict the 20 cases:
+```{r}
+answer.pred1<-predict(modelrf,testing)
+Index<-1:20
+results1=data.frame(Index,answer.pred1)
+kable(results1)
+```
+In     conclusion, I built the model using random forest, with preProcessed data. I used K-fold cross validation with K=10. Then I estimated out of sample error based on that. 
